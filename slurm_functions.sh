@@ -95,5 +95,3 @@ echo "Running: python $SCRIPT$args $FIXED_ARGS"
 python "$SCRIPT" $args $FIXED_ARGS
 EOF
 }
-
-alias sarray="sarray_params"
