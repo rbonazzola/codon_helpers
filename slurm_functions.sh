@@ -2,7 +2,7 @@
 
 sarray_params () {
     if [ $# -lt 2 ]; then
-        echo "Usage: sarray_params <script.py> <params.tsv/csv> [--dry-run|--dryrun|--dry_run] [--time=HH:MM:SS] [--mem=XXG] [--cpus=N] [--max-parallel=N] [extra args]"
+        echo "Usage: sarray_params <script.py> <params.tsv/csv> [--dry-run|--dryrun|--dry_run] [--time=HH:MM:SS] [--mem=XXG] [--cpus=N] [--gpus=N|--gpu-type=TYPE] [--max-parallel=N] [extra args]"
         return 1
     fi
 
