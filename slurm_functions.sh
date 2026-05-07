@@ -25,9 +25,11 @@ __sarray_expand_spec() {
 # Usage: sarray_params <script.py> <params.tsv/csv> [options] [extra args passed to every job]
 sarray_params () {
     if [ $# -lt 2 ]; then
-        echo "Usage: sarray_params <script.py> <params.tsv/csv> [--dry-run] [--lines=SPEC] [--sep=SEP] [--time=HH:MM:SS] [--mem=XXG] [--cpus=N] [--gpus=N|--gpu-type=TYPE] [--max-parallel=N] [extra args]"
-        echo "  --lines=SPEC  Run only selected rows (1-based, e.g. 3, 1-5, 1-3,7,10-12)"
-        echo "  --sep=SEP     Column separator (default: auto-detect from extension: .csv→',', else tab)"
+        echo "Usage: sarray_params <script.py> <params.tsv/csv> [--dry-run] [--lines=SPEC] [--sep=SEP] [--time=HH:MM:SS] [--mem=XXG] [--cpus=N] [--gpus=N|--gpu-type=TYPE] [--max-parallel=N] [--log-dir=DIR] [extra args]"
+        echo "  --lines=SPEC   Run only selected rows (1-based, e.g. 3, 1-5, 1-3,7,10-12)"
+        echo "  --sep=SEP      Column separator (default: auto-detect from extension: .csv→',', else tab)"
+        echo "  --log-dir=DIR    Directory for SLURM log files (default: current dir, pattern slurm-%A_%a.out)"
+        echo "  --log-prefix=PFX Prefix for SLURM log filenames (e.g. myrun → myrun_slurm-%A_%a.out)"
         return 1
     fi
 
@@ -45,6 +47,8 @@ sarray_params () {
     local slurm_gpu_type=""
     local max_parallel=""
     local custom_sep=""
+    local log_dir=""
+    local log_prefix=""
     local fixed_args=()   # arguments forwarded verbatim to every job
 
     # Parse our own flags; anything unrecognised is forwarded to the Python script
@@ -69,6 +73,10 @@ sarray_params () {
             --max-parallel=*)
                 # SLURM throttle: %N means "run at most N array tasks simultaneously"
                 max_parallel="%${arg#*=}" ;;
+            --log-dir=*)
+                log_dir="${arg#*=}" ;;
+            --log-prefix=*)
+                log_prefix="${arg#*=}" ;;
             *)
                 fixed_args+=("$arg") ;;
         esac
@@ -109,6 +117,23 @@ sarray_params () {
 
     # Default to all rows; --lines overrides to a subset (same syntax SLURM uses for --array)
     local array_spec="${lines_spec:-1-$n}"
+
+    # Auto-detect job name from experiment_name column (first selected row) unless overridden by --log-prefix
+    local job_name=""
+    local job_name_arg=()
+    if [ -z "$log_prefix" ]; then
+        local _header _first_line
+        _header=$(head -n1 "$params" | tr -d '\r')
+        _first_line=$(echo "$array_spec" | grep -oE '[0-9]+' | head -1)
+        IFS="$sep" read -r -a _cols <<< "$_header"
+        for i in "${!_cols[@]}"; do
+            if [ "${_cols[$i]}" = "experiment_name" ]; then
+                job_name=$(awk -F"$awk_sep" -v row="$_first_line" 'NR==row+1{print $'"$((i+1))"'}' "$params" | tr -d '\r')
+                break
+            fi
+        done
+        [ -n "$job_name" ] && job_name_arg=(--job-name="$job_name")
+    fi
 
     # ── Dry-run: print the command that each job would run, without submitting ──
     if [ $dryrun -eq 1 ]; then
@@ -156,7 +181,9 @@ sarray_params () {
     # --export passes the separator, params file path, and fixed args into the job environment
     # so the heredoc script can reconstruct the same argument-building logic on the compute node.
     # SLURM_ARRAY_TASK_ID (set automatically by SLURM) identifies which row this task should run.
-    sbatch --output=slurm-%A_%a.out \
+    local log_pattern="${log_dir:+${log_dir%/}/}${log_prefix:+${log_prefix}_}${job_name:+%x_}slurm-%A_%a.out"
+    sbatch --output="$log_pattern" \
+        "${job_name_arg[@]}" \
         --array=$array_spec$max_parallel \
         --time=$slurm_time \
         --mem=$slurm_mem \
